@@ -2,10 +2,12 @@ use axum::{
     routing::{get, post},
     Router,
     Json,
-    http::StatusCode,
+    http::{StatusCode, HeaderMap},
     response::{IntoResponse, Response},
     extract::State,
 };
+use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use serde::{Deserialize, Serialize};
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use jsonwebtoken::{encode, Header, EncodingKey};
@@ -28,6 +30,86 @@ use schema::users;  // This fixes the users::table not found error
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
+#[derive(Debug, Serialize)]
+struct UserResponse {
+    id: i32,
+    username: String,
+    email: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Claims {
+    sub: i32,
+    exp: i64,
+}
+
+async fn get_users(
+    State(pool): State<Arc<DbPool>>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract token from Authorization header
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode and validate JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret("your-secret-key".as_ref()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    let conn = &mut pool.get().map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database connection error: {}", e)}))
+    ))?;
+
+    // Check if the user is admin (username is 'rasmus')
+    let user = users::table
+        .find(claims.sub)
+        .first::<User>(conn)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?;
+
+    if user.username != "rasmus" {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Only admin can access this endpoint"}))
+        ));
+    }
+
+    // Get all users
+    let users_list = users::table
+        .select((users::id, users::username, users::email))
+        .load::<(i32, String, String)>(conn)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?;
+
+    let users_response: Vec<UserResponse> = users_list
+        .into_iter()
+        .map(|(id, username, email)| UserResponse { id, username, email })
+        .collect();
+
+    Ok(Json(users_response))
+}
 
 #[tokio::main]
 async fn main() {
@@ -46,6 +128,7 @@ async fn main() {
     let app = Router::new()
         .route("/api/login", post(login))
         .route("/api/register", post(register))
+        .route("/api/admin/users", get(get_users))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
