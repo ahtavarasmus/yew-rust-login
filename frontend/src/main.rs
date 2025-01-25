@@ -7,6 +7,7 @@ use pages::{
     home::Home,
     login::Login,
     register::Register,
+    admin::Admin,
 };
 
 #[derive(Clone, Routable, PartialEq)]
@@ -17,6 +18,8 @@ pub enum Route {
     Login,
     #[at("/register")]
     Register,
+    #[at("/admin")]
+    Admin,
 }
 
 
@@ -33,6 +36,10 @@ fn switch(routes: Route) -> Html {
         Route::Register => {
             info!("Rendering Register page");
             html! { <Register /> }
+        },
+        Route::Admin => {
+            info!("Rendering Admin page");
+            html! { <Admin /> }
         },
     }
 }
