@@ -4,7 +4,7 @@ use axum::{
     Router,
     Json,
     http::{StatusCode, HeaderMap},
-    response::{IntoResponse, Response},
+    response::Response,
     extract::State,
 };
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
@@ -14,15 +14,14 @@ use diesel::r2d2::{self, ConnectionManager};
 use jsonwebtoken::{encode, Header, EncodingKey};
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
-use tracing::{Level, info};
-use tracing_subscriber::FmtSubscriber;
+use tracing::Level;
 use std::sync::Arc;
 use chrono::{Duration, Utc};  // Add this for timestamp
 use serde_json::json;         // Add this for the json! macro
 
 // Import our models
 mod models;  // First declare the module
-use models::{User, NewUser, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse};  // Then import the types
+use models::{User, NewUser, LoginRequest, RegisterRequest, RegisterResponse};  // Then import the types
 
 // Import our schema
 mod schema;
@@ -57,7 +56,7 @@ async fn main() {
         .build(manager)
         .expect("Failed to create pool");
 
-    let conn = &mut pool.get().expect("Failed to get DB connection");
+    let _conn = &mut pool.get().expect("Failed to get DB connection");
     // Create router with CORS
     let app = Router::new()
         .route("/api/login", post(login))
