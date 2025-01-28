@@ -161,112 +161,7 @@ pub mod login {
     }
 }
 
-pub mod admin {
-    use yew::prelude::*;
-    use web_sys::window;
-    use gloo_net::http::Request;
-    use serde::Deserialize;
 
-    #[derive(Deserialize, Clone, Debug)]
-    struct UserInfo {
-        id: i32,
-        username: String,
-        email: String,
-    }
-
-    #[function_component]
-    pub fn Admin() -> Html {
-        let users = use_state(|| Vec::new());
-        let error = use_state(|| None::<String>);
-
-        // Clone state handles for the effect
-        let users_effect = users.clone();
-        let error_effect = error.clone();
-
-        use_effect_with_deps(move |_| {
-            let users = users_effect;
-            let error = error_effect;
-            wasm_bindgen_futures::spawn_local(async move {
-                // Get token from localStorage
-                let token = window()
-                    .and_then(|w| w.local_storage().ok())
-                    .flatten()
-                    .and_then(|storage| storage.get_item("token").ok())
-                    .flatten();
-
-                if let Some(token) = token {
-                    match Request::get("http://localhost:3000/api/admin/users")
-                        .header("Authorization", &format!("Bearer {}", token))
-                        .send()
-                        .await
-                    {
-                        Ok(response) => {
-                            if response.ok() {
-                                match response.json::<Vec<UserInfo>>().await {
-                                    Ok(data) => {
-                                        users.set(data);
-                                    }
-                                    Err(_) => {
-                                        error.set(Some("Failed to parse users data".to_string()));
-                                    }
-                                }
-                            } else {
-                                error.set(Some("Not authorized to view this page".to_string()));
-                            }
-                        }
-                        Err(_) => {
-                            error.set(Some("Failed to fetch users".to_string()));
-                        }
-                    }
-                }
-            });
-            || ()
-        }, ());
-
-        html! {
-            <div class="admin-container">
-                <h1>{"Admin Dashboard"}</h1>
-                {
-                    if let Some(error_msg) = (*error).as_ref().clone() {
-                        html! {
-                            <div class="error-message">
-                                {error_msg}
-                            </div>
-                        }
-                    } else {
-                        html! {
-                            <div class="users-list">
-                                <h2>{"Users List"}</h2>
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>{"ID"}</th>
-                                            <th>{"Username"}</th>
-                                            <th>{"Email"}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {
-                                            users.iter().map(|user| {
-                                                html! {
-                                                    <tr key={user.id}>
-                                                        <td>{user.id}</td>
-                                                        <td>{&user.username}</td>
-                                                        <td>{&user.email}</td>
-                                                    </tr>
-                                                }
-                                            }).collect::<Html>()
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        }
-                    }
-                }
-            </div>
-        }
-    }
-}
 
 pub mod register {
     use yew::prelude::*;
@@ -397,6 +292,113 @@ pub mod register {
                         {"Login here"}
                     </Link<Route>>
                 </div>
+            </div>
+        }
+    }
+}
+
+pub mod admin {
+    use yew::prelude::*;
+    use web_sys::window;
+    use gloo_net::http::Request;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Clone, Debug)]
+    struct UserInfo {
+        id: i32,
+        username: String,
+        email: String,
+    }
+
+    #[function_component]
+    pub fn Admin() -> Html {
+        let users = use_state(|| Vec::new());
+        let error = use_state(|| None::<String>);
+
+        // Clone state handles for the effect
+        let users_effect = users.clone();
+        let error_effect = error.clone();
+
+        use_effect_with_deps(move |_| {
+            let users = users_effect;
+            let error = error_effect;
+            wasm_bindgen_futures::spawn_local(async move {
+                // Get token from localStorage
+                let token = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten();
+
+                if let Some(token) = token {
+                    match Request::get("http://localhost:3000/api/admin/users")
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<Vec<UserInfo>>().await {
+                                    Ok(data) => {
+                                        users.set(data);
+                                    }
+                                    Err(_) => {
+                                        error.set(Some("Failed to parse users data".to_string()));
+                                    }
+                                }
+                            } else {
+                                error.set(Some("Not authorized to view this page".to_string()));
+                            }
+                        }
+                        Err(_) => {
+                            error.set(Some("Failed to fetch users".to_string()));
+                        }
+                    }
+                }
+            });
+            || ()
+        }, ());
+
+        html! {
+            <div class="admin-container">
+                <h1>{"Admin Dashboard"}</h1>
+                {
+                    if let Some(error_msg) = (*error).as_ref().clone() {
+                        html! {
+                            <div class="error-message">
+                                {error_msg}
+                            </div>
+                        }
+                    } else {
+                        html! {
+                            <div class="users-list">
+                                <h2>{"Users List"}</h2>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>{"ID"}</th>
+                                            <th>{"Username"}</th>
+                                            <th>{"Email"}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {
+                                            users.iter().map(|user| {
+                                                html! {
+                                                    <tr key={user.id}>
+                                                        <td>{user.id}</td>
+                                                        <td>{&user.username}</td>
+                                                        <td>{&user.email}</td>
+                                                    </tr>
+                                                }
+                                            }).collect::<Html>()
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+                }
             </div>
         }
     }
