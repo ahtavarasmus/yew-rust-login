@@ -1,3 +1,4 @@
+use dotenvy::dotenv;
 use axum::{
     routing::{get, post},
     Router,
@@ -43,6 +44,47 @@ struct Claims {
     exp: i64,
 }
 
+#[tokio::main]
+async fn main() {
+    dotenv().ok();
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .init();
+    // Set up database connection pool
+    let manager = ConnectionManager::<SqliteConnection>::new("database.db");
+    let pool = r2d2::Pool::builder()
+        .build(manager)
+        .expect("Failed to create pool");
+
+    let conn = &mut pool.get().expect("Failed to get DB connection");
+    // Create router with CORS
+    let app = Router::new()
+        .route("/api/login", post(login))
+        .route("/api/register", post(register))
+        .route("/api/admin/users", get(get_users))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO))
+        )
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
+                .allow_headers(Any)
+                .expose_headers([axum::http::header::CONTENT_TYPE])
+        )
+        .with_state(Arc::new(pool));
+
+    // Start server
+    axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
+
+
 async fn get_users(
     State(pool): State<Arc<DbPool>>,
     headers: HeaderMap,
@@ -63,7 +105,9 @@ async fn get_users(
     // Decode and validate JWT token
     let claims = match decode::<Claims>(
         token,
-        &DecodingKey::from_secret("your-secret-key".as_ref()),
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+                    .expect("JWT_SECRET_KEY must be set in environment")
+                    .as_bytes()),
         &Validation::new(Algorithm::HS256)
     ) {
         Ok(token_data) => token_data.claims,
@@ -111,71 +155,106 @@ async fn get_users(
     Ok(Json(users_response))
 }
 
-#[tokio::main]
-async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .init();
-    // Set up database connection pool
-    let manager = ConnectionManager::<SqliteConnection>::new("database.db");
-    let pool = r2d2::Pool::builder()
-        .build(manager)
-        .expect("Failed to create pool");
-
-    let conn = &mut pool.get().expect("Failed to get DB connection");
-    // Create router with CORS
-    let app = Router::new()
-        .route("/api/login", post(login))
-        .route("/api/register", post(register))
-        .route("/api/admin/users", get(get_users))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
-                .on_response(DefaultOnResponse::new().level(Level::INFO))
-        )
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
-                .allow_headers(Any)
-                .expose_headers([axum::http::header::CONTENT_TYPE])
-        )
-        .with_state(Arc::new(pool));
-
-    // Start server
-    axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-}
 
 async fn login(
     State(pool): State<Arc<DbPool>>,
     Json(login_req): Json<LoginRequest>,
-) -> Json<LoginResponse> {
-    let conn = &mut pool.get().unwrap();
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    let conn = &mut pool.get().map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Database connection error"}))
+    ))?;
     
-    // Find user and verify password (simplified for example)
     let user = users::table
-        .filter(users::username.eq(&login_req.username))
-        .select(User::as_select())
-        .first::<User>(conn)
-        .optional()
-        .unwrap();
+            .filter(users::username.eq(&login_req.username))
+            .select(User::as_select())
+            .first::<User>(conn)
+            .optional()
+            .map_err(|_| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ))?;
 
     match user {
-        Some(user) if bcrypt::verify(&login_req.password, &user.password_hash).unwrap() => {
-            // Generate JWT token (simplified)
-            let token = encode(
-                &Header::default(),
-                &json!({ "sub": user.id, "exp": (Utc::now() + Duration::hours(24)).timestamp() }),
-                &EncodingKey::from_secret("your-secret-key".as_ref()),
-            ).unwrap();
-           
-            Json(LoginResponse { token })
+        Some(user) => {
+            if let Ok(valid) = bcrypt::verify(&login_req.password, &user.password_hash) {
+                if valid {
+                    // Generate access token (short-lived)
+                    let access_token = encode(
+                        &Header::default(),
+                        &json!({
+                            "sub": user.id,
+                            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+                            "type": "access"
+                        }),
+                        &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+                            .expect("JWT_SECRET_KEY must be set in environment")
+                            .as_bytes()),
+                    ).map_err(|_| (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Token generation failed"}))
+                    ))?;
+    
+                    // Generate refresh token (long-lived)
+                    let refresh_token = encode(
+                        &Header::default(),
+                        &json!({
+                            "sub": user.id,
+                            "exp": (Utc::now() + Duration::days(7)).timestamp(),
+                            "type": "refresh"
+                        }),
+                        &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
+                            .expect("JWT_REFRESH_KEY must be set in environment")
+                            .as_bytes()),
+                    ).map_err(|_| (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Token generation failed"}))
+                    ))?;
+                    // Create response with HttpOnly cookies
+                    let mut response = Response::new(
+                        axum::body::boxed(axum::body::Full::from(
+                            Json(json!({"message": "Login successful", "token": access_token})).to_string()
+                        ))
+                    );
+                    
+                    let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
+                    response.headers_mut().insert(
+                        "Set-Cookie",
+                        format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
+                            .parse()
+                            .unwrap(),
+                    );
+                    response.headers_mut().insert(
+                        "Set-Cookie",
+                        format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
+                            .parse()
+                            .unwrap(),
+                    );
+                    
+                    // Set content type header
+                    response.headers_mut().insert(
+                        "Content-Type",
+                        "application/json".parse().unwrap()
+                    );
+    
+                    Ok(response)
+                } else {
+                    Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({"error": "Invalid credentials"}))
+                    ))
+                }
+            } else {
+                Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Invalid credentials"}))
+                ))
+            }
         },
-        _ => panic!("Invalid credentials"), // In real app, handle this properly
+        None => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid credentials"}))
+        )),
     }
 }
 

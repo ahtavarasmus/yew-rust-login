@@ -288,22 +288,30 @@ pub mod register {
         message: String,
     }
 
+    #[derive(Deserialize)]
+    pub struct ErrorResponse {
+        error: String,
+    }
+
     #[function_component]
     pub fn Register() -> Html {
         let username = use_state(String::new);
         let password = use_state(String::new);
         let email = use_state(String::new);
+        let error = use_state(|| None::<String>);
 
         let onsubmit = {
             let username = username.clone();
             let password = password.clone();
             let email = email.clone();
+            let error_setter = error.clone();
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let username = (*username).clone();
                 let password = (*password).clone();
                 let email = (*email).clone();
+                let error_setter = error_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
                     let response = Request::post("http://localhost:3000/api/register")
@@ -323,13 +331,20 @@ pub mod register {
                                 let window = web_sys::window().unwrap();
                                 let _ = window.location().set_href("/login");
                             } else {
-                                let error = resp.text().await.unwrap_or_else(|_| "Unknown error".into());
-                                web_sys::console::error_1(&error.into());
+                                match resp.json::<ErrorResponse>().await {
+                                    Ok(error_response) => {
+                                        error_setter.set(Some(error_response.error));
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("An unknown error occurred".to_string()));
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
-                            web_sys::console::error_1(&format!("Request failed: {}", e).into());
+                            error_setter.set(Some(format!("Request failed: {}", e)));
                         }
+
                     }
                 });
             })
@@ -338,6 +353,17 @@ pub mod register {
         html! {
             <div class="register-container">
                 <h1>{"Register"}</h1>
+                {
+                    if let Some(error_message) = (*error).as_ref() {
+                        html! {
+                            <div class="error-message" style="color: red; margin-bottom: 10px;">
+                                {error_message}
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
                 <form onsubmit={onsubmit}>
                     <input
                         type="text"
