@@ -2,18 +2,18 @@ pub mod home {
     use yew::prelude::*;
     use yew_router::prelude::*;
     use crate::Route;
-use web_sys::window;
+    use web_sys::window;
 
-fn is_logged_in() -> bool {
-    if let Some(window) = window() {
-        if let Ok(Some(storage)) = window.local_storage() {
-            if let Ok(Some(_token)) = storage.get_item("token") {
-                return true;
+    fn is_logged_in() -> bool {
+        if let Some(window) = window() {
+            if let Ok(Some(storage)) = window.local_storage() {
+                if let Ok(Some(_token)) = storage.get_item("token") {
+                    return true;
+                }
             }
         }
+        false
     }
-    false
-}
 
     #[function_component]
     pub fn Home() -> Html {
