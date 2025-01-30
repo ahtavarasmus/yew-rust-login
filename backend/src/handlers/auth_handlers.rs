@@ -247,6 +247,6 @@ pub async fn register(
 
     println!("User registered successfully");
     Ok(Json(RegisterResponse {
-        message: "User registered successfully".to_string(),
+        message: "User registered successfully! Redirecting...".to_string(),
     }))
 }

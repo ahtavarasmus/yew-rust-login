@@ -87,46 +87,66 @@ pub mod login {
         let username = use_state(String::new);
         let password = use_state(String::new);
         let error = use_state(|| None::<String>);
+        let success = use_state(|| None::<String>);
 
         let onsubmit = {
             let username = username.clone();
             let password = password.clone();
+            let error_setter = error.clone();
+            let success_setter = success.clone();
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let username = (*username).clone();
                 let password = (*password).clone();
+                let error_setter = error_setter.clone();
+                let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post("http://localhost:3000/api/login")
                         .json(&LoginRequest { username, password })
-                        {
-                            Ok(request) => {
-                                match request.send().await {
-                                    Ok(response) => {
-                                        if response.ok() {
-                                            match response.json::<LoginResponse>().await {
-                                                Ok(resp) => {
-                                                    let window = web_sys::window().unwrap();
-                                                    if let Ok(Some(storage)) = window.local_storage() {
-                                                        if storage.set_item("token", &resp.token).is_ok() {
-                                                            // Redirect to home page after successful login
-                                                            let _ = window.location().set_href("/");
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => web_sys::console::error_1(&format!("Failed to parse response: {:?}", e).into()),
+                        .unwrap()
+                        .send()
+                        .await 
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<LoginResponse>().await {
+                                    Ok(resp) => {
+                                        let window = web_sys::window().unwrap();
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            if storage.set_item("token", &resp.token).is_ok() {
+                                                error_setter.set(None);
+                                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
+                                                
+                                                // Redirect after a short delay to show the success message
+                                                let window_clone = window.clone();
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(1_000).await;
+                                                    let _ = window_clone.location().set_href("/");
+                                                });
                                             }
-                                        } else {
-                                            let error = response.text().await.unwrap_or_else(|_| "Login failed".to_string());
-                                            web_sys::console::error_1(&error.into());
                                         }
                                     }
-                                    Err(e) => web_sys::console::error_1(&format!("Network error: {:?}", e).into()),
+                                    Err(_) => {
+                                        error_setter.set(Some("Failed to parse server response".to_string()));
+                                    }
+                                }
+                            } else {
+                                match response.json::<ErrorResponse>().await {
+                                    Ok(error_response) => {
+                                        error_setter.set(Some(error_response.error));
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("Login failed".to_string()));
+                                    }
                                 }
                             }
-                            Err(e) => web_sys::console::error_1(&format!("Failed to create request: {:?}", e).into()),
                         }
+                        Err(e) => {
+                            error_setter.set(Some(format!("Request failed: {}", e)));
+                        }
+                    }
                 });
             })
         };
@@ -134,6 +154,23 @@ pub mod login {
         html! {
             <div class="login-container">
                 <h1>{"Login"}</h1>
+                {
+                    if let Some(error_message) = (*error).as_ref() {
+                        html! {
+                            <div class="error-message" style="color: red; margin-bottom: 10px;">
+                                {error_message}
+                            </div>
+                        }
+                    } else if let Some(success_message) = (*success).as_ref() {
+                        html! {
+                            <div class="success-message" style="color: green; margin-bottom: 10px;">
+                                {success_message}
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
                 <form onsubmit={onsubmit}>
                     <input
                         type="text"
@@ -197,12 +234,14 @@ pub mod register {
         let password = use_state(String::new);
         let email = use_state(String::new);
         let error = use_state(|| None::<String>);
+        let success = use_state(|| None::<String>);
 
         let onsubmit = {
             let username = username.clone();
             let password = password.clone();
             let email = email.clone();
             let error_setter = error.clone();
+            let success_setter = success.clone();
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
@@ -210,9 +249,10 @@ pub mod register {
                 let password = (*password).clone();
                 let email = (*email).clone();
                 let error_setter = error_setter.clone();
+                let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    let response = Request::post("http://localhost:3000/api/register")
+                    match Request::post("http://localhost:3000/api/register")
                         .json(&RegisterRequest { 
                             username, 
                             password,
@@ -220,14 +260,26 @@ pub mod register {
                         })
                         .unwrap()
                         .send()
-                        .await;
-
-                    match response {
+                        .await 
+                    {
                         Ok(resp) => {
                             if resp.ok() {
-                                // Redirect to login
-                                let window = web_sys::window().unwrap();
-                                let _ = window.location().set_href("/login");
+                                match resp.json::<RegisterResponse>().await {
+                                    Ok(success_response) => {
+                                        error_setter.set(None);
+                                        success_setter.set(Some(success_response.message));
+                                        
+                                        let window = web_sys::window().unwrap();
+                                        let window_clone = window.clone();
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            gloo_timers::future::TimeoutFuture::new(2_000).await;
+                                            let _ = window_clone.location().set_href("/login");
+                                        });
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("Failed to parse server response".to_string()));
+                                    }
+                                }
                             } else {
                                 match resp.json::<ErrorResponse>().await {
                                     Ok(error_response) => {
@@ -242,7 +294,6 @@ pub mod register {
                         Err(e) => {
                             error_setter.set(Some(format!("Request failed: {}", e)));
                         }
-
                     }
                 });
             })
@@ -256,6 +307,12 @@ pub mod register {
                         html! {
                             <div class="error-message" style="color: red; margin-bottom: 10px;">
                                 {error_message}
+                            </div>
+                        }
+                    } else if let Some(success_message) = (*success).as_ref() {
+                        html! {
+                            <div class="success-message" style="color: green; margin-bottom: 10px;">
+                                {success_message}
                             </div>
                         }
                     } else {
