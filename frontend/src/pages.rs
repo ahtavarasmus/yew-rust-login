@@ -68,22 +68,25 @@ pub mod login {
     use serde::{Deserialize, Serialize};
     use yew_router::prelude::*;
     use crate::Route;
-
     #[derive(Serialize)]
     pub struct LoginRequest {
         username: String,
         password: String,
     }
-
     #[derive(Deserialize)]
     pub struct LoginResponse {
         token: String,
+    }
+    #[derive(Deserialize)]
+    struct ErrorResponse {
+        error: String,
     }
 
     #[function_component]
     pub fn Login() -> Html {
         let username = use_state(String::new);
         let password = use_state(String::new);
+        let error = use_state(|| None::<String>);
 
         let onsubmit = {
             let username = username.clone();

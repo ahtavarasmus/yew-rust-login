@@ -22,14 +22,29 @@ mod repositories {
 }
 mod schema;
 
+use repositories::user_repository::UserRepository;
+
+
 use handlers::auth_handlers::{register, login, get_users};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
+pub struct AppState {
+    db_pool: DbPool,
+    user_repository: Arc<UserRepository>,
+}
+
+pub fn validate_env() {
+    let _ = std::env::var("JWT_SECRET_KEY")
+        .expect("JWT_SECRET_KEY must be set");
+    let _ = std::env::var("JWT_REFRESH_KEY")
+        .expect("JWT_REFRESH_KEY must be set");
+}
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
+    validate_env();
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
@@ -40,7 +55,15 @@ async fn main() {
         .build(manager)
         .expect("Failed to create pool");
 
+    let user_repository = Arc::new(UserRepository::new(pool.clone()));
+
     let _conn = &mut pool.get().expect("Failed to get DB connection");
+
+    let state = Arc::new(AppState {
+        db_pool: pool,
+        user_repository,
+    });
+
     // Create router with CORS
     let app = Router::new()
         .route("/api/login", post(login))
@@ -58,7 +81,7 @@ async fn main() {
                 .allow_headers(Any)
                 .expose_headers([axum::http::header::CONTENT_TYPE])
         )
-        .with_state(Arc::new(pool));
+        .with_state(state);
 
     // Start server
     axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
