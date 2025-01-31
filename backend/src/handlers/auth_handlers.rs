@@ -9,14 +9,10 @@ use serde_json::json;
 use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation, Algorithm};
 use chrono::{Duration, Utc};
 
-
-
 use crate::{
-    models::user_models::{User, NewUser},
-    handlers::auth_models::{LoginRequest, RegisterRequest, RegisterResponse, UserResponse, Claims},
+    handlers::auth_dtos::{LoginRequest, RegisterRequest, RegisterResponse, UserResponse, Claims, NewUser},
     AppState
 };
-
 
 
 pub async fn get_users(
@@ -95,10 +91,6 @@ pub async fn login(
             ));
         }
     };
-    println!("found user: {}", &user.username);
-    println!("Attempting to verify password:");
-    println!("Input password: {}", &login_req.password);
-    println!("Stored hash: {}", &user.password_hash);
    
     match bcrypt::verify(&login_req.password, &user.password_hash) {
         Ok(valid) => {
@@ -234,8 +226,6 @@ pub async fn register(
         password_hash: password_hash,
         email: reg_req.email,
     };
-    println!("Creating new user with username: {}, password_hash: {}, email: {}", 
-             new_user.username, new_user.password_hash, new_user.email);
 
     state.user_repository.create_user(new_user).map_err(|e| {
         println!("User creation failed: {}", e);

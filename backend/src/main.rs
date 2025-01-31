@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 mod handlers {
     pub mod auth_handlers;
-    pub mod auth_models;
+    pub mod auth_dtos;
+    pub mod profile_handlers;
 }
 mod models {
     pub mod user_models;
@@ -24,8 +25,8 @@ mod schema;
 
 use repositories::user_repository::UserRepository;
 
-
 use handlers::auth_handlers::{register, login, get_users};
+use handlers::profile_handlers::{get_profile, update_profile};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
@@ -69,6 +70,8 @@ async fn main() {
         .route("/api/login", post(login))
         .route("/api/register", post(register))
         .route("/api/admin/users", get(get_users))
+        .route("/api/profile/update", post(update_profile))
+        .route("/api/profile", get(get_profile))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -76,13 +79,16 @@ async fn main() {
         )
         .layer(
             CorsLayer::new()
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::OPTIONS
+                ])
                 .allow_origin(Any)
-                .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS])
                 .allow_headers(Any)
                 .expose_headers([axum::http::header::CONTENT_TYPE])
         )
         .with_state(state);
-
     // Start server
     axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
         .serve(app.into_make_service())

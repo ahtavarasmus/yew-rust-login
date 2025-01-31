@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use crate::schema::users;  
 
-#[derive(Queryable, Selectable)]
+#[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct User {
@@ -9,12 +9,7 @@ pub struct User {
     pub username: String,
     pub password_hash: String,
     pub email: String,
+    pub phone_number: Option<String>,
 }
 
-#[derive(Insertable)]
-#[diesel(table_name = users)]
-pub struct NewUser {
-    pub username: String,
-    pub password_hash: String,
-    pub email: String,
-}
+

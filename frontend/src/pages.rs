@@ -61,297 +61,201 @@ pub mod home {
     }
 }
 
-pub mod login {
+
+pub mod profile {
     use yew::prelude::*;
-    use web_sys::HtmlInputElement;
+    use web_sys::{HtmlInputElement, window};
     use gloo_net::http::Request;
     use serde::{Deserialize, Serialize};
-    use yew_router::prelude::*;
-    use crate::Route;
-    #[derive(Serialize)]
-    pub struct LoginRequest {
+
+    #[derive(Deserialize)]
+    struct UserProfile {
         username: String,
-        password: String,
+        email: String,
+        phone_number: Option<String>,
     }
-    #[derive(Deserialize)]
-    pub struct LoginResponse {
-        token: String,
-    }
-    #[derive(Deserialize)]
-    struct ErrorResponse {
-        error: String,
+
+    #[derive(Serialize)]
+    struct UpdateProfileRequest {
+        phone_number: String,
     }
 
     #[function_component]
-    pub fn Login() -> Html {
-        let username = use_state(String::new);
-        let password = use_state(String::new);
-        let error = use_state(|| None::<String>);
-        let success = use_state(|| None::<String>);
+    pub fn Profile() -> Html {
+            let profile = use_state(|| None::<UserProfile>);
+            let phone_number = use_state(String::new);
+            let error = use_state(|| None::<String>);
+            let success = use_state(|| None::<String>);
+            let is_editing = use_state(|| false);
 
-        let onsubmit = {
-            let username = username.clone();
-            let password = password.clone();
-            let error_setter = error.clone();
-            let success_setter = success.clone();
-            
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let username = (*username).clone();
-                let password = (*password).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
+        // Fetch user profile 
+        {
+            let profile = profile.clone();
+            let error = error.clone();
+
+            use_effect_with_deps(move |_| {
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Some(token) = window()
+                        .and_then(|w| w.local_storage().ok())
+                        .flatten()
+                        .and_then(|storage| storage.get_item("token").ok())
+                        .flatten()
+                    {
+                        match Request::get("http://localhost:3000/api/profile")
+                            .header("Authorization", &format!("Bearer {}", token))
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                if response.ok() {
+                                    match response.json::<UserProfile>().await {
+                                        Ok(data) => {
+                                            profile.set(Some(data));
+                                        }
+                                        Err(_) => {
+                                            error.set(Some("Failed to parse profile data".to_string()));
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                error.set(Some("Failed to fetch profile".to_string()));
+                            }
+                        }
+                    }
+                });
+                || ()
+            }, ());
+        }
+
+        let on_edit = {
+            let phone_number = phone_number.clone();
+            let error = error.clone();
+            let success = success.clone();
+            let profile = profile.clone();
+            let is_editing = is_editing.clone();
+
+            Callback::from(move |_e: MouseEvent| {
+                let phone = (*phone_number).clone();
+                let error = error.clone();
+                let success = success.clone();
+                let profile = profile.clone();
+                let is_editing = is_editing.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post("http://localhost:3000/api/login")
-                        .json(&LoginRequest { username, password })
-                        .unwrap()
-                        .send()
-                        .await 
+                    if let Some(token) = window()
+                        .and_then(|w| w.local_storage().ok())
+                        .flatten()
+                        .and_then(|storage| storage.get_item("token").ok())
+                        .flatten()
                     {
-                        Ok(response) => {
-                            if response.ok() {
-                                match response.json::<LoginResponse>().await {
-                                    Ok(resp) => {
-                                        let window = web_sys::window().unwrap();
-                                        if let Ok(Some(storage)) = window.local_storage() {
-                                            if storage.set_item("token", &resp.token).is_ok() {
-                                                error_setter.set(None);
-                                                success_setter.set(Some("Login successful! Redirecting...".to_string()));
-                                                
-                                                // Redirect after a short delay to show the success message
-                                                let window_clone = window.clone();
-                                                wasm_bindgen_futures::spawn_local(async move {
-                                                    gloo_timers::future::TimeoutFuture::new(1_000).await;
-                                                    let _ = window_clone.location().set_href("/");
-                                                });
+                        match Request::post("http://localhost:3000/api/profile/update")
+                            .header("Authorization", &format!("Bearer {}", token))
+                            .json(&UpdateProfileRequest { phone_number: phone })
+                            .unwrap()
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                if response.ok() {
+                                    success.set(Some("Profile updated successfully".to_string()));
+                                    error.set(None);
+                                    is_editing.set(false);
+                                    
+                                    // Clear success message after 3 seconds
+                                    let success_clone = success.clone();
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        gloo_timers::future::TimeoutFuture::new(3_000).await;
+                                        success_clone.set(None);
+                                    });
+                                    
+                                    // Fetch updated profile data after successful update
+                                    if let Ok(profile_response) = Request::get("http://localhost:3000/api/profile")
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(updated_profile) = profile_response.json::<UserProfile>().await {
+                                            profile.set(Some(updated_profile));
+                                        }
+                                    }
+                                } else {
+                                    error.set(Some("Failed to update profile".to_string()));
+                                }
+                            }
+                            Err(_) => {
+                                error.set(Some("Failed to send request".to_string()));
+                            }
+                        }
+                    }
+                });
+            })
+        };
+        html! {
+            <div class="profile-container">
+                <h1>{"Your Profile"}</h1>
+                {
+                    if let Some(error_msg) = (*error).as_ref() {
+                        html! {
+                            <div class="error-message" style="color: red;">
+                                {error_msg}
+                            </div>
+                        }
+                    } else if let Some(success_msg) = (*success).as_ref() {
+                        html! {
+                            <div class="success-message" style="color: green;">
+                                {success_msg}
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+                {
+                    if let Some(user_profile) = (*profile).as_ref() {
+                        html! {
+                            <div class="profile-info">
+                                <p><strong>{"Username: "}</strong>{&user_profile.username}</p>
+                                <p><strong>{"Email: "}</strong>{&user_profile.email}</p>
+                                <p>
+                                    <strong>{"Phone: "}</strong>
+                                    {
+                                        if *is_editing {
+                                            html! {
+                                                <input
+                                                    type="tel"
+                                                    value={user_profile.phone_number.clone().unwrap_or_default()}
+                                                    onchange={let phone_number = phone_number.clone(); move |e: Event| {
+                                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                                        phone_number.set(input.value());
+                                                    }}
+                                                />
+                                            }
+                                        } else {
+                                            html! {
+                                                <span>{user_profile.phone_number.clone().unwrap_or_default()}</span>
                                             }
                                         }
                                     }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
-                                    }
-                                }
-                            } else {
-                                match response.json::<ErrorResponse>().await {
-                                    Ok(error_response) => {
-                                        error_setter.set(Some(error_response.error));
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Login failed".to_string()));
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error_setter.set(Some(format!("Request failed: {}", e)));
-                        }
-                    }
-                });
-            })
-        };
-
-        html! {
-            <div class="login-container">
-                <h1>{"Login"}</h1>
-                {
-                    if let Some(error_message) = (*error).as_ref() {
-                        html! {
-                            <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                {error_message}
-                            </div>
-                        }
-                    } else if let Some(success_message) = (*success).as_ref() {
-                        html! {
-                            <div class="success-message" style="color: green; margin-bottom: 10px;">
-                                {success_message}
+                                    <button onclick={
+                                        let is_editing = is_editing.clone();
+                                        if *is_editing {
+                                            on_edit
+                                        } else {
+                                            Callback::from(move |_| is_editing.set(true))
+                                        }
+                                    }>
+                                        {if *is_editing { "Confirm" } else { "Edit" }}
+                                    </button>
+                                </p>
                             </div>
                         }
                     } else {
-                        html! {}
+                        html! {
+                            <p>{"Loading profile..."}</p>
+                        }
                     }
                 }
-                <form onsubmit={onsubmit}>
-                    <input
-                        type="text"
-                        placeholder="Username"
-                        onchange={let username = username.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            username.set(input.value());
-                        }}
-                    />
-                    <input
-                        type="password"
-                        placeholder="Password"
-                        onchange={let password = password.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            password.set(input.value());
-                        }}
-                    />
-                    <button type="submit">{"Login"}</button>
-                </form>
-                <div class="auth-redirect">
-                    {"Don't have an account? "}
-                    <Link<Route> to={Route::Register}>
-                        {"Register here"}
-                    </Link<Route>>
-                </div>
-            </div>
-        }
-    }
-}
-
-
-
-pub mod register {
-    use yew::prelude::*;
-    use web_sys::HtmlInputElement;
-    use gloo_net::http::Request;
-    use serde::{Deserialize, Serialize};
-    use yew_router::prelude::*;
-    use crate::Route;
-
-    #[derive(Serialize)]
-    pub struct RegisterRequest {
-        username: String,
-        password: String,
-        email: String,
-    }
-
-    #[derive(Deserialize)]
-    pub struct RegisterResponse {
-        message: String,
-    }
-
-    #[derive(Deserialize)]
-    pub struct ErrorResponse {
-        error: String,
-    }
-
-    #[function_component]
-    pub fn Register() -> Html {
-        let username = use_state(String::new);
-        let password = use_state(String::new);
-        let email = use_state(String::new);
-        let error = use_state(|| None::<String>);
-        let success = use_state(|| None::<String>);
-
-        let onsubmit = {
-            let username = username.clone();
-            let password = password.clone();
-            let email = email.clone();
-            let error_setter = error.clone();
-            let success_setter = success.clone();
-            
-            Callback::from(move |e: SubmitEvent| {
-                e.prevent_default();
-                let username = (*username).clone();
-                let password = (*password).clone();
-                let email = (*email).clone();
-                let error_setter = error_setter.clone();
-                let success_setter = success_setter.clone();
-
-                wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post("http://localhost:3000/api/register")
-                        .json(&RegisterRequest { 
-                            username, 
-                            password,
-                            email,
-                        })
-                        .unwrap()
-                        .send()
-                        .await 
-                    {
-                        Ok(resp) => {
-                            if resp.ok() {
-                                match resp.json::<RegisterResponse>().await {
-                                    Ok(success_response) => {
-                                        error_setter.set(None);
-                                        success_setter.set(Some(success_response.message));
-                                        
-                                        let window = web_sys::window().unwrap();
-                                        let window_clone = window.clone();
-                                        wasm_bindgen_futures::spawn_local(async move {
-                                            gloo_timers::future::TimeoutFuture::new(2_000).await;
-                                            let _ = window_clone.location().set_href("/login");
-                                        });
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
-                                    }
-                                }
-                            } else {
-                                match resp.json::<ErrorResponse>().await {
-                                    Ok(error_response) => {
-                                        error_setter.set(Some(error_response.error));
-                                    }
-                                    Err(_) => {
-                                        error_setter.set(Some("An unknown error occurred".to_string()));
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error_setter.set(Some(format!("Request failed: {}", e)));
-                        }
-                    }
-                });
-            })
-        };
-
-        html! {
-            <div class="register-container">
-                <h1>{"Register"}</h1>
-                {
-                    if let Some(error_message) = (*error).as_ref() {
-                        html! {
-                            <div class="error-message" style="color: red; margin-bottom: 10px;">
-                                {error_message}
-                            </div>
-                        }
-                    } else if let Some(success_message) = (*success).as_ref() {
-                        html! {
-                            <div class="success-message" style="color: green; margin-bottom: 10px;">
-                                {success_message}
-                            </div>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
-                <form onsubmit={onsubmit}>
-                    <input
-                        type="text"
-                        placeholder="Username"
-                        onchange={let username = username.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            username.set(input.value());
-                        }}
-                    />
-                    <input
-                        type="email"
-                        placeholder="Email"
-                        onchange={let email = email.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            email.set(input.value());
-                        }}
-                    />
-                    <input
-                        type="password"
-                        placeholder="Password"
-                        onchange={let password = password.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            password.set(input.value());
-                        }}
-                    />
-                    <button type="submit">{"Register"}</button>
-                </form>
-                <div class="auth-redirect">
-                    {"Already have an account? "}
-                    <Link<Route> to={Route::Login}>
-                        {"Login here"}
-                    </Link<Route>>
-                </div>
             </div>
         }
     }

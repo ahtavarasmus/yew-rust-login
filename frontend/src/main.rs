@@ -5,9 +5,13 @@ use tracing::info;
 mod pages;
 use pages::{
     home::Home,
+    admin::Admin,
+    profile::Profile,
+};
+mod auth_components;
+use auth_components::{
     login::Login,
     register::Register,
-    admin::Admin,
 };
 
 #[derive(Clone, Routable, PartialEq)]
@@ -20,6 +24,8 @@ pub enum Route {
     Register,
     #[at("/admin")]
     Admin,
+    #[at("/profile")]
+    Profile,
 }
 
 
@@ -35,11 +41,15 @@ fn switch(routes: Route) -> Html {
         },
         Route::Register => {
             info!("Rendering Register page");
-            html! { <Register /> }
-        },
+            html! { <Register /> }   
+        }
         Route::Admin => {
             info!("Rendering Admin page");
             html! { <Admin /> }
+        },
+        Route::Profile => {
+            info!("Rendering Profile page");
+            html! { <Profile /> }
         },
     }
 }

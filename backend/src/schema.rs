@@ -6,5 +6,6 @@ diesel::table! {
         username -> Text,
         password_hash -> Text,
         email -> Text,
+        phone_number -> Nullable<Text>,
     }
 }
